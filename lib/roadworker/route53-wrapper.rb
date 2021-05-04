@@ -164,9 +164,21 @@ module Roadworker
 
       def each
         if @hosted_zone.id
-          Collection.batch(@options.route53.list_resource_record_sets(hosted_zone_id: @hosted_zone.id), :resource_record_sets) do |record|
-            yield(ResourceRecordSetWrapper.new(record, @hosted_zone, @options))
-          end
+          # Workaround for aws-sdk-ruby bug:
+          # pager keeps using the last known next_record_identifier value when not present in a page (therefore pager finishes too early)
+          last_page = nil
+          begin
+            page = @options.route53.list_resource_record_sets(
+              hosted_zone_id: @hosted_zone.id,
+              start_record_name: last_page&.next_record_name,
+              start_record_type: last_page&.next_record_type,
+              start_record_identifier: last_page&.next_record_identifier,
+            )
+            page.resource_record_sets.each do |record|
+              yield(ResourceRecordSetWrapper.new(record, @hosted_zone, @options))
+            end
+            last_page = page
+          end while page.next_record_name || page.next_record_type || page.next_record_identifier
         end
       end
     end # ResourceRecordSetCollectionWrapper

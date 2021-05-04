@@ -35,7 +35,7 @@ module Roadworker
         rrsets = []
         zone_h[:rrsets] = rrsets
 
-        Collection.batch(@options.route53.list_resource_record_sets(hosted_zone_id: zone.id), :resource_record_sets) do |record|
+        enumerate_rrsets(zone.id) do |record|
           if record.name == zone.name and %w(SOA NS).include?(record.type) and not @options.with_soa_ns
             next
           end
@@ -73,6 +73,22 @@ module Roadworker
           end
         end
       end
+    end
+
+    # Workaround for aws-sdk-ruby bug:
+    # pager keeps using the last known next_record_identifier value when not present in a page (therefore pager finishes too early)
+    def enumerate_rrsets(zone_id, &block)
+      last_page = nil
+      begin
+        page = @options.route53.list_resource_record_sets(
+          hosted_zone_id: zone.id,
+          start_record_name: last_page&.next_record_name,
+          start_record_type: last_page&.next_record_type,
+          start_record_identifier: last_page&.next_record_identifier,
+        )
+        page.resource_record_sets.each(&block)
+        last_page = page
+      end while page.next_record_name || page.next_record_type || page.next_record_identifier
     end
 
     def item_to_hash(item, *attrs)
